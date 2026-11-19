@@ -1,0 +1,129 @@
+name: Build VoiceChat15
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack project zip if needed
+        run: |
+          if [ ! -f Makefile ]; then
+            for z in *.zip; do unzip -o "$z"; done
+          fi
+          if [ -d VoiceChat15 ] && [ -f VoiceChat15/Makefile ]; then
+            cp -R VoiceChat15/. .
+          fi
+          ls -la
+          test -f Makefile
+          test -f VoiceChat15.plist
+          chmod 644 VoiceChat15.plist
+          ls -l VoiceChat15.plist
+
+      - name: Install build tools (ldid, dpkg)
+        run: |
+          brew install ldid dpkg || brew install ldid dpkg
+          which ldid
+          which dpkg-deb || true
+
+      - name: Install Theos
+        run: |
+          export THEOS="$HOME/theos"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          rm -rf "$THEOS/sdks"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$THEOS/sdks"
+          git -C "$THEOS/sdks" sparse-checkout set iPhoneOS16.5.sdk
+          ls "$THEOS/sdks"
+          xcodebuild -version
+
+      - name: Build package (rootless, arm64)
+        run: |
+          set -o pipefail
+          make clean
+          make package FINALPACKAGE=1 2>&1 | tee build.log
+          ls -lh packages/
+
+      - name: Inspect Debian package
+        run: |
+          set -e
+          DEB="$(ls packages/*.deb | head -n 1)"
+          echo "DEB=$DEB"
+          {
+            echo "=== Package file ==="
+            echo "$DEB"
+            echo
+            echo "=== Control metadata (dpkg-deb -f) ==="
+            dpkg-deb -f "$DEB"
+            echo
+            echo "=== Contents (dpkg-deb -c) ==="
+            dpkg-deb -c "$DEB"
+            echo
+            echo "=== Contents paths ==="
+            dpkg-deb -c "$DEB" | awk '{print $6}'
+            echo
+            echo "=== Required files check ==="
+            CONTENTS="$(dpkg-deb -c "$DEB" | awk '{print $6}')"
+            echo "$CONTENTS" | grep -q "VoiceChat15.dylib" && echo "FOUND VoiceChat15.dylib" || { echo "MISSING VoiceChat15.dylib"; exit 1; }
+            echo "$CONTENTS" | grep -q "VoiceChat15.plist" && echo "FOUND VoiceChat15.plist" || { echo "MISSING VoiceChat15.plist"; exit 1; }
+            echo "$CONTENTS" | grep -q "VoiceChat15Prefs" && echo "FOUND VoiceChat15Prefs bundle" || { echo "MISSING VoiceChat15Prefs bundle"; exit 1; }
+            echo
+            echo "=== VoiceChat15.plist permission ==="
+            dpkg-deb -c "$DEB" | grep "VoiceChat15.plist" || true
+            PLIST_PERM="$(dpkg-deb -c "$DEB" | grep "VoiceChat15.plist" | awk '{print $1}')"
+            echo "PLIST_PERM=$PLIST_PERM"
+            if [ "$PLIST_PERM" = "-rw-r--r--" ]; then
+              echo "PLIST PERMISSION OK (644)"
+            else
+              echo "PLIST PERMISSION NOT 644: $PLIST_PERM"
+              exit 1
+            fi
+            echo
+            echo "=== Rootless layout check ==="
+            echo "$CONTENTS" | grep -q "var/jb" && echo "FOUND rootless var/jb paths" || { echo "MISSING rootless var/jb paths"; exit 1; }
+            echo
+            echo "=== Extracted dylib inspection ==="
+            rm -rf /tmp/deb_inspect
+            mkdir -p /tmp/deb_inspect
+            dpkg-deb -x "$DEB" /tmp/deb_inspect
+            find /tmp/deb_inspect -name "VoiceChat15.dylib" -print
+            DYLIB="$(find /tmp/deb_inspect -name "VoiceChat15.dylib" | head -n 1)"
+            echo "DYLIB=$DYLIB"
+            file "$DYLIB" || true
+            lipo -info "$DYLIB" || true
+            otool -L "$DYLIB" || true
+            echo
+            echo "=== Inspection passed ==="
+          } 2>&1 | tee inspection_report.txt
+          cp "$DEB" VoiceChat15_Dopamine_Rootless.deb
+          ls -lh VoiceChat15_Dopamine_Rootless.deb
+
+      - name: Prepare source ZIP
+        run: |
+          rm -rf VoiceChat15_Source
+          mkdir -p VoiceChat15_Source
+          if [ -d VoiceChat15 ]; then
+            cp -R VoiceChat15/. VoiceChat15_Source/
+          fi
+          mkdir -p VoiceChat15_Source/.github/workflows
+          cp .github/workflows/build.yml VoiceChat15_Source/.github/workflows/build.yml 2>/dev/null || true
+          rm -rf VoiceChat15_Source/.git
+          zip -r VoiceChat15_Source.zip VoiceChat15_Source
+          ls -lh VoiceChat15_Source.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VOICECHAT15-0.1.0-rootless
+          path: |
+            VoiceChat15_Dopamine_Rootless.deb
+            VoiceChat15_Source.zip
+            build.log
+            inspection_report.txt
