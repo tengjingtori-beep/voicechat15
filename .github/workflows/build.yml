@@ -156,7 +156,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VOICECHAT15-0.1.1-rootless
+          name: VOICECHAT15-0.1.2-rootless
           path: |
             VoiceChat15_Dopamine_Rootless.deb
             VoiceChat15_Source.zip
