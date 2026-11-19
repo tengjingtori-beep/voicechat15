@@ -24,7 +24,9 @@ jobs:
           ls -la
           test -f Makefile
           test -f VoiceChat15.plist
-          chmod 644 VoiceChat15.plist
+          find . -type d -exec chmod 755 {} +
+          find . -type f -exec chmod 644 {} +
+          chmod 644 VoiceChat15.plist prefs/entry.plist prefs/Resources/Root.plist
           ls -l VoiceChat15.plist
 
       - name: Install build tools (ldid, dpkg)
@@ -86,6 +88,39 @@ jobs:
               exit 1
             fi
             echo
+            echo "=== PreferenceLoader entry plist permission ==="
+            dpkg-deb -c "$DEB" | grep "PreferenceLoader/Preferences/VoiceChat15Prefs.plist" || true
+            ENTRY_PLIST_PERM="$(dpkg-deb -c "$DEB" | grep "PreferenceLoader/Preferences/VoiceChat15Prefs.plist" | awk '{print $1}')"
+            echo "ENTRY_PLIST_PERM=$ENTRY_PLIST_PERM"
+            if [ "$ENTRY_PLIST_PERM" = "-rw-r--r--" ]; then
+              echo "ENTRY PLIST PERMISSION OK (644)"
+            else
+              echo "ENTRY PLIST PERMISSION NOT 644: $ENTRY_PLIST_PERM"
+              exit 1
+            fi
+            echo
+            echo "=== VoiceChat15Prefs.bundle Root.plist permission ==="
+            dpkg-deb -c "$DEB" | grep "VoiceChat15Prefs.bundle/Root.plist" || true
+            ROOT_PLIST_PERM="$(dpkg-deb -c "$DEB" | grep "VoiceChat15Prefs.bundle/Root.plist" | awk '{print $1}')"
+            echo "ROOT_PLIST_PERM=$ROOT_PLIST_PERM"
+            if [ "$ROOT_PLIST_PERM" = "-rw-r--r--" ]; then
+              echo "ROOT PLIST PERMISSION OK (644)"
+            else
+              echo "ROOT PLIST PERMISSION NOT 644: $ROOT_PLIST_PERM"
+              exit 1
+            fi
+            echo
+            echo "=== VoiceChat15Prefs.bundle directory permission ==="
+            dpkg-deb -c "$DEB" | grep "VoiceChat15Prefs.bundle$" || true
+            BUNDLE_DIR_PERM="$(dpkg-deb -c "$DEB" | grep "VoiceChat15Prefs.bundle$" | awk '{print $1}')"
+            echo "BUNDLE_DIR_PERM=$BUNDLE_DIR_PERM"
+            if [ "$BUNDLE_DIR_PERM" = "drwxr-xr-x" ]; then
+              echo "BUNDLE DIRECTORY PERMISSION OK (755)"
+            else
+              echo "BUNDLE DIRECTORY PERMISSION NOT 755: $BUNDLE_DIR_PERM"
+              exit 1
+            fi
+            echo
             echo "=== Rootless layout check ==="
             echo "$CONTENTS" | grep -q "var/jb" && echo "FOUND rootless var/jb paths" || { echo "MISSING rootless var/jb paths"; exit 1; }
             echo
@@ -121,7 +156,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VOICECHAT15-0.1.0-rootless
+          name: VOICECHAT15-0.1.1-rootless
           path: |
             VoiceChat15_Dopamine_Rootless.deb
             VoiceChat15_Source.zip
